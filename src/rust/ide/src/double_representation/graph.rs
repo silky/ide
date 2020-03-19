@@ -9,9 +9,12 @@ use crate::double_representation::definition::DefinitionProvider;
 use crate::double_representation::node::NodeInfo;
 
 use ast::Ast;
+use ast::Block;
 use ast::BlockLine;
+use ast::BlockType;
 use ast::known;
 use utils::fail::FallibleResult;
+use utils::vec::pop_front;
 
 
 
@@ -22,6 +25,11 @@ use utils::fail::FallibleResult;
 #[derive(Fail,Debug)]
 #[fail(display="ID was not found.")]
 struct IdNotFound {id:ast::ID}
+
+#[derive(Fail,Debug)]
+#[fail(display="Cannot set Block lines because no line with Some(Ast) was found. Block must have \
+at least one non-empty line.")]
+struct MissingLineWithAst;
 
 
 
@@ -97,6 +105,50 @@ pub fn traverse_for_definition
 
 
 
+// ==========================
+// === Block constructors ===
+// ==========================
+
+/// Gets all block lines.
+pub fn get_all_block_lines<T:Clone>(block:&Block<T>) -> Vec<BlockLine<Option<T>>> {
+    let mut lines = Vec::new();
+    for off in &block.empty_lines {
+        let elem = None;
+        let off  = *off;
+        lines.push(BlockLine{elem,off})
+    }
+
+    let first_line = block.first_line.clone();
+    let elem       = Some(first_line.elem);
+    let off        = first_line.off;
+    lines.push(BlockLine{elem,off});
+
+    for line in &block.lines {
+        lines.push(line.clone())
+    }
+    lines
+}
+
+/// Creates a new block with the provided lines.
+pub fn new_block_with_lines<T>(mut lines:Vec<BlockLine<Option<T>>>) -> FallibleResult<Block<T>> {
+    let mut empty_lines = Vec::new();
+    let mut line        = pop_front(&mut lines).ok_or(MissingLineWithAst)?;
+    while let None = line.elem {
+        empty_lines.push(line.off);
+        line = pop_front(&mut lines).ok_or(MissingLineWithAst)?;
+    }
+    let elem       = line.elem.ok_or(MissingLineWithAst)?;
+    let off        = line.off;
+    let first_line = BlockLine {elem,off};
+    let indent     = crate::double_representation::INDENT;
+    let is_orphan  = false;
+    let ty         = BlockType::Discontinuous {};
+    Ok(Block {empty_lines,first_line,lines,indent,is_orphan,ty})
+}
+
+
+
+
 // =================
 // === GraphInfo ===
 // =================
@@ -143,23 +195,74 @@ impl GraphInfo {
         position.ok_or(IdNotFound{id}.into())
     }
 
+    fn get_all_lines(infix:&known::Infix) -> FallibleResult<Vec<BlockLine<Option<Ast>>>> {
+        if let Ok(block) = known::Block::try_from(infix.rarg.clone()) {
+            Ok(get_all_block_lines(&block))
+        } else {
+            let elem = Some(infix.rarg.clone());
+            let off  = 0;
+            Ok(vec![BlockLine{elem,off}])
+        }
+    }
+
+    fn visit_and_maybe_modify
+    ( infix         : &known::Infix
+    , block_line    : &BlockLine<Option<Ast>>
+    , location_hint : &LocationHint) -> FallibleResult<known::Infix> {
+        let mut lines = Self::get_all_lines(&infix)?;
+
+        let index = match location_hint {
+            LocationHint::Start      => Ok(0),
+            LocationHint::End        => Ok(lines.len()),
+            LocationHint::Before(id) => Self::find_node_index_in_lines(&lines,*id),
+            LocationHint::After(id)  => {
+                Self::find_node_index_in_lines(&lines,*id).map(|index| index + 1)
+            }
+        };
+
+        if let Ok(index) = index {
+            let block_line = block_line.clone();
+            lines.insert(index, block_line);
+
+            let block = new_block_with_lines(lines)?;
+            let rarg = Ast::new(block, None);
+            let infix = infix.deref().clone();
+            Ok(known::KnownAst::new(ast::Infix { rarg, ..infix }, None))
+        } else {
+            let lines = lines.iter().map(|line| {
+                if let Some(elem) = &line.elem {
+                    if let Ok(infix) = known::Infix::try_from(elem) {
+                        let ast = Self::visit_and_maybe_modify(&infix,&block_line,&location_hint);
+                        let infix = ast.unwrap_or(infix);
+
+                        let elem = Some(infix.clone().into());
+                        let off  = line.off;
+                        BlockLine{elem,off}
+                    } else {
+                        line.clone()
+                    }
+                } else {
+                    line.clone()
+                }
+            }).collect();
+
+            let block = new_block_with_lines(lines)?;
+            let rarg = Ast::new(block, None);
+            let infix = infix.deref().clone();
+            Ok(known::KnownAst::new(ast::Infix { rarg, ..infix }, None))
+            //Err(index.unwrap_err())
+        }
+    }
+
     /// Adds a new node to this graph.
     pub fn add_node
     (&mut self, line_ast:Ast, location_hint:LocationHint) -> FallibleResult<()> {
-        let mut lines = self.source.block_lines()?;
-
-        let index = match location_hint {
-            LocationHint::Start      => 0,
-            LocationHint::End        => lines.len(),
-            LocationHint::After(id)  => Self::find_node_index_in_lines(&lines, id)? + 1,
-            LocationHint::Before(id) => Self::find_node_index_in_lines(&lines, id)?
-        };
-
         let elem = Some(line_ast);
         let off  = 0;
-        lines.insert(index,BlockLine{elem,off});
+        let block_line = BlockLine{elem,off};
 
-        self.source.set_block_lines(lines)?;
+        let ast = Self::visit_and_maybe_modify(&self.source.ast,&block_line,&location_hint);
+        ast.map(|ast| self.source.ast = ast)?;
         Ok(())
     }
 
@@ -287,7 +390,8 @@ main =
 
     foo = node
 
-    foo a = not_node
+    add a b =
+        a + b
 
     print "hello"
 
@@ -299,7 +403,18 @@ main =
         let (line_ast1,id1) = create_node_ast(&mut parser, "a + b");
         let (line_ast2,id2) = create_node_ast(&mut parser, "x * x");
         let (line_ast3,id3) = create_node_ast(&mut parser, "x / x");
+        let (line_ast4,id4) = create_node_ast(&mut parser, "a * 2");
 
+        ensogl::system::web::set_stdout();
+
+        let definition  = graph.source.list_definitions()[0].clone();
+        let child_graph = GraphInfo::from_definition(definition);
+        let child_nodes = child_graph.nodes();
+        assert_eq!(child_nodes.len(), 1);
+
+        assert_eq!(graph.nodes().len(), 2);
+
+        assert!(graph.add_node(line_ast4, LocationHint::Before(child_nodes[0].id())).is_ok());
         assert!(graph.add_node(line_ast0, LocationHint::Start).is_ok());
         assert!(graph.add_node(line_ast1, LocationHint::Before(graph.nodes()[0].id())).is_ok());
         assert!(graph.add_node(line_ast2, LocationHint::After(graph.nodes()[1].id())).is_ok());
@@ -317,6 +432,14 @@ main =
         assert_eq!(nodes[4].expression().repr(), "print \"hello\"");
         assert_eq!(nodes[5].expression().repr(), "x / x");
         assert_eq!(nodes[5].id(), id3);
+
+        let add_def   = graph.source.list_definitions()[0].clone();
+        let add_graph = GraphInfo::from_definition(add_def);
+        let nodes     = add_graph.nodes();
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].expression().repr(), "a * 2");
+        assert_eq!(nodes[0].id(), id4);
+        assert_eq!(nodes[1].expression().repr(), "a + b");
     }
 
     #[wasm_bindgen_test]

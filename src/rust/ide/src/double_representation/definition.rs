@@ -9,18 +9,6 @@ use ast::known;
 use ast::prefix;
 use ast::opr;
 use shapely::EmptyIterator;
-use utils::vec::pop_front;
-
-
-
-// =============
-// === Error ===
-// =============
-
-#[derive(Fail,Debug)]
-#[fail(display="Cannot set Block lines because no line with Some(Ast) was found. Block must have \
-at least one non-empty line.")]
-struct MissingLineWithAst;
 
 
 
@@ -150,7 +138,7 @@ impl DefinitionInfo {
     /// `Infix`, it returns a single `BlockLine`.
     pub fn block_lines(&self) -> FallibleResult<Vec<ast::BlockLine<Option<Ast>>>> {
         if let Ok(block) = known::Block::try_from(self.body()) {
-            Ok(block.all_lines())
+            Ok(crate::double_representation::graph::get_all_block_lines(&block))
         } else {
             let elem = Some(self.body());
             let off  = 0;
@@ -161,20 +149,8 @@ impl DefinitionInfo {
     /// Sets the definition block lines. `lines` must contain at least one non-empty line to
     /// succeed.
     pub fn set_block_lines
-    (&mut self, mut lines:Vec<ast::BlockLine<Option<Ast>>>) -> FallibleResult<()> {
-        let mut empty_lines = Vec::new();
-        let mut line        = pop_front(&mut lines).ok_or(MissingLineWithAst)?;
-        while let None = line.elem {
-            empty_lines.push(line.off);
-            line = pop_front(&mut lines).ok_or(MissingLineWithAst)?;
-        }
-        let elem       = line.elem.ok_or(MissingLineWithAst)?;
-        let off        = line.off;
-        let first_line = ast::BlockLine {elem,off};
-        let indent     = crate::double_representation::INDENT;
-        let is_orphan  = false;
-        let ty         = ast::BlockType::Discontinuous {};
-        let block      = ast::Block {empty_lines,first_line,lines,indent,is_orphan,ty};
+    (&mut self, lines:Vec<ast::BlockLine<Option<Ast>>>) -> FallibleResult<()> {
+        let block      = crate::double_representation::graph::new_block_with_lines(lines)?;
         let rarg       = Ast::new(block, None);
         let infix      = self.ast.deref().clone();
         self.ast       = known::KnownAst::new(ast::Infix {rarg,..infix}, None);
