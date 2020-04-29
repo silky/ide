@@ -2,7 +2,8 @@
 
 use crate::prelude::*;
 
-use crate::types::UTCDateTime;
+use crate::types::*;
+
 use json_rpc::api::Result;
 use json_rpc::Handler;
 use json_rpc::make_rpc_methods;
@@ -10,7 +11,6 @@ use futures::Stream;
 use serde::Serialize;
 use serde::Deserialize;
 use std::future::Future;
-use uuid::Uuid;
 
 
 
@@ -49,12 +49,12 @@ trait API {
     /// Request the project picker to list the user's most recently opened projects.
     #[MethodInput=ListRecentProjectsInput,rpc_name="project/listRecent",
     result=list_recent_projects_result,set_result=set_list_recent_projects_result]
-    fn list_recent_projects(&self, number_of_projects:u32) -> ProjectListResponse;
+    fn list_recent_projects(&self, number_of_projects:NumberOfProjects) -> ProjectListResponse;
 
     /// Request the creation of a new project.
     #[MethodInput=CreateProjectInput,rpc_name="project/create",result=create_project_result,
     set_result=set_create_project_result]
-    fn create_project(&self, name:String) -> CreateProjectResponse;
+    fn create_project(&self, name:ProjectName) -> CreateProjectResponse;
 
     /// Request the deletion of a project.
     #[MethodInput=DeleteProjectInput,rpc_name="project/delete",result=delete_project_result,
@@ -64,7 +64,7 @@ trait API {
     /// Request a list of sample projects that are available to the user.
     #[MethodInput=ListSamplesInput,rpc_name="project/listSample",result=list_samples_result,
     set_result=set_list_samples_result]
-    fn list_samples(&self, num_projects:u32) -> ProjectListResponse;
+    fn list_samples(&self, num_projects:NumberOfProjects) -> ProjectListResponse;
 }
 }
 
@@ -84,10 +84,42 @@ pub struct IpWithSocket {
 }
 
 /// Project name.
-#[derive(Debug,Clone,Serialize,Deserialize,PartialEq,Shrinkwrap)]
+#[derive(Debug,Clone,Serialize,Deserialize,PartialEq,Shrinkwrap,Eq,Hash)]
 pub struct ProjectName {
     #[allow(missing_docs)]
     pub name : String
+}
+
+impl AsRef<ProjectName> for ProjectName {
+    fn as_ref(&self) -> &ProjectName {
+        self
+    }
+}
+
+impl From<&str> for ProjectName {
+    fn from(from:&str) -> ProjectName {
+        ProjectName{name:from.into()}
+    }
+}
+
+/// Number of projects.
+#[derive(Debug,Clone,Copy,Serialize,Deserialize,PartialEq,Shrinkwrap,Eq,Hash)]
+#[serde(rename_all = "camelCase")]
+pub struct NumberOfProjects {
+    #[allow(missing_docs)]
+    pub number_of_projects : u32
+}
+
+impl AsRef<NumberOfProjects> for NumberOfProjects {
+    fn as_ref(&self) -> &NumberOfProjects {
+        self
+    }
+}
+
+impl From<u32> for NumberOfProjects {
+    fn from(number_of_projects:u32) -> NumberOfProjects {
+        NumberOfProjects{number_of_projects}
+    }
 }
 
 /// Project information, such as name, its id and last time it was opened.
@@ -140,7 +172,6 @@ mod mock_client_tests {
     use json_rpc::Result;
     use std::future::Future;
     use utils::test::poll_future_output;
-    use uuid::Uuid;
 
     fn error<T>(message:&str) -> Result<T> {
         let code    = 1;
@@ -159,13 +190,14 @@ mod mock_client_tests {
     fn project_life_cycle() {
         let mock_client             = MockClient::default();
         let expected_uuid           = Uuid::default();
-        let creation_response       = CreateProjectResponse { project_id : expected_uuid.clone() };
+        let creation_response       = CreateProjectResponse{project_id:expected_uuid.clone()};
         let host                    = "localhost".to_string();
         let port                    = 30500;
         let language_server_address = IpWithSocket {host,port};
         let expected_ip_with_socket = OpenProjectResponse { language_server_address };
         let open_result             = Ok(expected_ip_with_socket.clone());
-        mock_client.set_create_project_result("HelloWorld".into(),Ok(creation_response));
+        let project_name            = ProjectName{name:"HelloWorld".into()};
+        mock_client.set_create_project_result(&project_name,Ok(creation_response));
         mock_client.set_open_project_result(expected_uuid.clone(),open_result);
         mock_client.set_close_project_result(expected_uuid.clone(),error("Project isn't open."));
         mock_client.set_delete_project_result(expected_uuid.clone(),error("Project doesn't exist."));
@@ -173,7 +205,7 @@ mod mock_client_tests {
         let delete_result = mock_client.delete_project(expected_uuid.clone());
         result(delete_result).expect_err("Project shouldn't exist.");
 
-        let creation_response = mock_client.create_project("HelloWorld".into());
+        let creation_response = mock_client.create_project(project_name);
         let uuid = result(creation_response).expect("Couldn't create project").project_id;
         assert_eq!(uuid, expected_uuid);
 
@@ -216,14 +248,15 @@ mod mock_client_tests {
             last_opened : Some(DateTime::parse_from_rfc3339("2019-12-25T00:10:58Z").unwrap())
         };
         let expected_sample_projects = ProjectListResponse { projects : vec![sample1,sample2] };
-        mock_client.set_list_recent_projects_result(2,Ok(expected_recent_projects.clone()));
-        mock_client.set_list_samples_result(2,Ok(expected_sample_projects.clone()));
+        let number_of_projects       = NumberOfProjects{number_of_projects:2};
+        mock_client.set_list_recent_projects_result(number_of_projects,Ok(expected_recent_projects.clone()));
+        mock_client.set_list_samples_result(number_of_projects,Ok(expected_sample_projects.clone()));
 
         let list_recent_error = "Couldn't get recent projects.";
         let list_sample_error = "Couldn't get sample projects.";
-        let recent_projects = result(mock_client.list_recent_projects(2)).expect(list_recent_error);
+        let recent_projects = result(mock_client.list_recent_projects(number_of_projects)).expect(list_recent_error);
         assert_eq!(recent_projects, expected_recent_projects);
-        let sample_projects = result(mock_client.list_samples(2)).expect(list_sample_error);
+        let sample_projects = result(mock_client.list_samples(number_of_projects)).expect(list_sample_error);
         assert_eq!(sample_projects, expected_sample_projects);
     }
 }
@@ -295,7 +328,7 @@ mod remote_client_tests {
     fn test_requests() {
         let unit_json               = json!(null);
         let project_id              = Uuid::default();
-        let create_project_response = CreateProjectResponse { project_id };
+        let create_project_response = CreateProjectResponse{project_id};
         let project_id_json   = json!({"projectId":"00000000-0000-0000-0000-000000000000"});
         let language_server_address = IpWithSocket{host:"localhost".to_string(),port:27015};
         let ip_with_address         = OpenProjectResponse { language_server_address };
@@ -337,42 +370,42 @@ mod remote_client_tests {
         });
 
         test_request(
-            |client| client.list_recent_projects(number_of_projects),
+            |client| client.list_recent_projects(NumberOfProjects{number_of_projects}),
             "project/listRecent",
             &number_of_projects_json,
             &project_list_json,
             &project_list
         );
         test_request(
-            |client| client.list_samples(number_of_projects),
+            |client| client.list_samples(NumberOfProjects{number_of_projects}),
             "project/listSample",
             &num_projects_json,
             &project_list_json,
             &project_list
         );
         test_request(
-            |client| client.open_project(project_id.clone()),
+            |client| client.open_project(&project_id),
             "project/open",
             &project_id_json,
             &ip_with_address_json,
             &ip_with_address
         );
         test_request(
-            |client| client.close_project(project_id.clone()),
+            |client| client.close_project(&project_id),
             "project/close",
             &project_id_json,
             &unit_json,
             &()
         );
         test_request(
-            |client| client.delete_project(project_id.clone()),
+            |client| client.delete_project(&project_id),
             "project/delete",
             &project_id_json,
             &unit_json,
             &()
         );
         test_request(
-            |client| client.create_project(project_name.clone()),
+            |client| client.create_project(ProjectName{name:project_name}),
             "project/create",
             &project_name_json,
             &project_id_json,

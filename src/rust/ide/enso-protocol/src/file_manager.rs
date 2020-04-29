@@ -2,7 +2,7 @@
 
 use crate::prelude::*;
 
-use crate::types::UTCDateTime;
+use crate::types::*;
 
 use json_rpc::api::Result;
 use json_rpc::Handler;
@@ -11,7 +11,6 @@ use futures::Stream;
 use serde::Serialize;
 use serde::Deserialize;
 use std::future::Future;
-use uuid::Uuid;
 
 
 
@@ -38,6 +37,12 @@ impl Path {
     /// Wraps a `String`-like entity into a new `Path`.
     pub fn new(s:impl Str) -> Path {
         Path(s.into())
+    }
+}
+
+impl AsRef<Path> for Path {
+    fn as_ref(&self) -> &Path {
+        self
     }
 }
 
@@ -85,6 +90,32 @@ pub enum FilesystemEventKind {
     Modified,
     /// An overflow occurred and some events were lost,
     Overflow
+}
+
+
+
+// ===================
+// === FileContent ===
+// ===================
+
+/// File's content.
+#[derive(Debug,Clone,Serialize,Deserialize,PartialEq,Shrinkwrap,Eq,Hash)]
+pub struct FileContent {
+    #[allow(missing_docs)]
+    #[serde(flatten)]
+    pub content : String
+}
+
+impl AsRef<FileContent> for FileContent {
+    fn as_ref(&self) -> &FileContent {
+        self
+    }
+}
+
+impl From<&str> for FileContent {
+    fn from(from:&str) -> FileContent {
+        FileContent{content:from.into()}
+    }
 }
 
 
@@ -174,7 +205,7 @@ trait API {
 
     /// Writes String contents to a file in the specified path.
     #[MethodInput=WriteInput,rpc_name="file/write",result=write_result,set_result=set_write_result]
-    fn write(&self, path:Path, contents:String) -> ();
+    fn write(&self, path:Path, contents:FileContent) -> ();
 
     /// Watches the specified path.
     #[MethodInput=CreateWatchInput,rpc_name="file/createWatch",result=create_watch_result,set_result=set_create_watch_result]
@@ -372,13 +403,14 @@ mod tests {
             unit_json.clone(),
             ());
         test_request(
-            |client| client.write(main.clone(), "Hello world!".into()),
+            |client| client.write(&main,FileContent{content:"Hello world!".into()}),
             "file/write",
             json!({"path" : "./Main.txt", "contents" : "Hello world!"}),
             unit_json.clone(),
             ());
 
         let uuid_value = uuid::Uuid::parse_str("02723954-fbb0-4641-af53-cec0883f260a").unwrap();
+        let uuid_value = Uuid{id:uuid_value};
         let uuid_json  = json!("02723954-fbb0-4641-af53-cec0883f260a");
         test_request(
             |client| client.create_watch(main.clone()),
