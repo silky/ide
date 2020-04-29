@@ -1,5 +1,16 @@
 //! Helper macros to generate RemoteClient and MockClient.
 
+/// Removes & from &ty. e.g. `remove_ref(&u32)` => `u32`
+#[macro_export]
+macro_rules! remove_ref {
+    (&$name:ty) => {
+        $name
+    };
+    ($name:ty) => {
+        $name
+    }
+}
+
 /// This macro reads a `trait API` item and generates asynchronous methods for RPCs. Each method
 /// should be signed with `MethodInput`, `rpc_name`, `result` and `set_result` attributes. e.g.:
 /// ```rust,compile_fail
@@ -37,7 +48,7 @@ macro_rules! make_rpc_methods {
         $(#[doc = $impl_doc])+
         pub trait API {
             $($(#[doc = $doc])+
-            fn $method(&self $(,$param_name:$param_ty)+) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>>;
+            fn $method(&self $(,$param_name:$crate::remove_ref!($param_ty))+) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>>;
             )*
         }
 
@@ -77,7 +88,7 @@ macro_rules! make_rpc_methods {
         }
 
         impl API for Client {
-            $(fn $method(&self, $($param_name:$param_ty),*) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>> {
+            $(fn $method(&self, $($param_name:$crate::remove_ref!($param_ty)),*) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>> {
                 let input = $method_input { $($param_name:$param_name),* };
                 Box::pin(self.handler.borrow().open_request(input))
             })*
@@ -88,7 +99,7 @@ macro_rules! make_rpc_methods {
             #[derive(Serialize,Deserialize,Debug,PartialEq)]
             #[serde(rename_all = "camelCase")]
             struct $method_input {
-                $($param_name : $param_ty),*
+                $($param_name : $crate::remove_ref!($param_ty)),*
             }
 
             impl json_rpc::RemoteMethodCall for $method_input {
@@ -106,11 +117,11 @@ macro_rules! make_rpc_methods {
         /// Mock used for tests.
         #[derive(Debug,Default)]
         pub struct MockClient {
-            $($method_result : RefCell<HashMap<($($param_ty),+),Result<$result>>>,)*
+            $($method_result : RefCell<HashMap<($($crate::remove_ref!($param_ty)),+),Result<$result>>>,)*
         }
 
         impl API for MockClient {
-            $(fn $method(&self $(,$param_name:$param_ty)+) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>> {
+            $(fn $method(&self $(,$param_name:$crate::remove_ref!($param_ty))+) -> std::pin::Pin<Box<dyn Future<Output=Result<$result>>>> {
                 let mut result = self.$method_result.borrow_mut();
                 let result     = result.remove(&($($param_name),+)).unwrap();
                 Box::pin(async move { result })
@@ -119,7 +130,7 @@ macro_rules! make_rpc_methods {
 
         impl MockClient {
             $(/// Sets `$method`'s result to be returned when it is called.
-            pub fn $set_result(&self $(,$param_name:$param_ty)+, result:Result<$result>) {
+            pub fn $set_result(&self $(,$param_name:$crate::remove_ref!($param_ty))+, result:Result<$result>) {
                 self.$method_result.borrow_mut().insert(($($param_name),+),result);
             })*
         }
