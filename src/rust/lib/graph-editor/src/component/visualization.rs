@@ -5,85 +5,135 @@
 //! elements that facilitate generic interactions, for example, visualisation selection. The
 //! `Container` also provides the FRP API that allows internal interaction with the
 //! `Visualisation`. Data for a visualisation has to be provided wrapped in the `Data` struct.
+pub mod sample;
 
 use crate::prelude::*;
 
 use crate::frp;
 
-use ensogl::display::DomSymbol;
 use ensogl::display;
-use ensogl::system::web;
 use serde_json;
-use web::StyleSetter;
+use fmt;
+use std::any;
 
 
 
 // ============================================
 // === Wrapper for Visualisation Input Data ===
 // ============================================
+/// Type indicator
+/// TODO[mm] use enso types?
+type DataType = any::TypeId;
 
 /// Wrapper for data that can be consumed by a visualisation.
-// TODO replace with better typed data wrapper.
-#[derive(Clone,CloneRef,Debug)]
+/// TODO[mm] consider static versus dynamic typing for visualizations and data!
+#[derive(Clone,CloneRefDebug)]
 #[allow(missing_docs)]
 pub enum Data {
-    JSON { content : Rc<serde_json::Value> },
-    Binary,
+    JSON   { content : Rc<serde_json::Value> },
+    Binary { content : Rc<dyn Any>           },
 }
 
 impl Data {
-    /// Render the data as JSON.
-    pub fn as_json(&self) -> String {
+    /// Returns the data as as JSON. If the data cannot be returned as JSON, it will return a
+    /// `DataError` instead.
+    pub fn as_json(&self) -> Result<Rc<serde_json::Value>, DataError> {
         match &self {
-            Data::JSON { content } => content.to_string(),
-            _ => "{}".to_string(),
+            Data::JSON { content } => Ok(Rc::clone(content)),
+            _ => { Err(DataError::InvalidDataType)  },
+        }
+    }
+
+    /// Returns the wrapped data in Rust format. If the data cannot be returned as rust datatype, a
+    /// `DataError` is returned instead.
+    fn as_binary<T:'static>(&self) -> Result<Rc<T>, DataError> {
+        match &self {
+            Data::JSON { .. } => { Err(DataError::InvalidDataType) },
+            Data::Binary { content } => { Rc::clone(content).downcast()
+                .or(Err(DataError::InvalidDataType))},
         }
     }
 }
 
-
+#[derive(Clone,Debug)]
+pub enum DataError {
+    InvalidDataType
+}
 
 // =============================================
 // === Internal Visualisation Representation ===
 // =============================================
 
+pub trait DataRenderer: display::Object {
+    /// Indicate which DataTypes can be rendered by this visualization.
+    fn valid_input_types(&self) -> Vec<DataType>;
+
+    /// Set the data that should be rendered. Returns the data as processed by this visualization.
+    /// TODO consider having different input and output types.
+    fn set_data(&self, data:Data) -> Result<Data, DataError>;
+
+    /// Set the size of the visualization.
+    fn set_size(&self, size:Vector2<f32>);
+}
+
+/// TODO check what is required here.
+type PreprocessId = String;
+type StatusCallback = Rc<dyn Fn()>;
+type DataCallback = Rc<dyn Fn(&Data)>;
+type PreprocessorCallback = Rc<dyn Fn(Rc<dyn Fn(PreprocessId)>)>;
+
+
 /// Inner representation of a visualisation.
-#[derive(Clone,CloneRef,Debug)]
+#[derive(Clone)]
 #[allow(missing_docs)]
 pub struct Visualization {
-    content : DomSymbol
+    renderer     : Rc<dyn DataRenderer>,
+    preprocessor : Option<PreprocessId>,
+    on_show      : Option<StatusCallback>,
+    on_hide      : Option<StatusCallback>,
+    on_change    : Option<DataCallback>,
+    on_preprocess_change : Option<PreprocessorCallback>,
+}
+
+impl Debug for Visualization {
+    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // unimplemented!()
+        Ok(())
+    }
 }
 
 impl display::Object  for Visualization {
     fn display_object(&self) -> &display::object::Instance {
-        &self.content.display_object()
+        &self.renderer.display_object()
     }
 }
 
 impl Visualization {
-    /// Update the visualisation with the given data.
-    // TODO remove dummy functionality and use an actual visualisation
-    pub fn set_data(&self, data:Data){
-                self.content.dom().set_inner_html(
-                    &format!(r#"
-<svg>
-  <circle style="fill: #69b3a2" stroke="black" cx=50 cy=50 r={}></circle>
-</svg>
-"#, data.as_json()));
+
+    pub fn new(renderer:Rc<dyn DataRenderer>) -> Self {
+        let preprocessor         = None;
+        let on_hide              = None;
+        let on_show              = None;
+        let on_change            = None;
+        let on_preprocess_change = None;
+        Visualization { renderer,preprocessor,on_change,on_preprocess_change,on_hide,on_show}
+    }
+
+    /// Update the visualisation with the given data. Returns an error if the data did not match
+    /// the visualization.
+    pub fn set_data(&self, data:Data) -> Result<(),DataError> {
+        let output_data = self.renderer.set_data(data)?;
+        if let Some(callback) = self.on_change.as_ref() {
+            callback(&output_data)
+        }
+        Ok(())
      }
 
-    /// Set whether the visualisation should be visible or not.
-    fn set_visibility(&self, is_visible:bool) {
-        let visible = if is_visible {"visible" } else { "hidden" };
-        self.content.dom().set_style_or_panic("visibility", visible);
+    pub fn set_size(&self, size: Vector2<f32>) {
+        self.renderer.set_size(size)
     }
 }
 
-impl From<DomSymbol> for Visualization {
-    fn from(symbol:DomSymbol) -> Self {
-        Visualization { content : symbol }
-    }
-}
 
 
 // =========================
@@ -148,22 +198,27 @@ pub struct WeakContainer {
 #[derive(Debug,Clone)]
 #[allow(missing_docs)]
 pub struct ContainerData {
-    logger         : Logger,
-    display_object : display::object::Instance,
-    size           : Cell<Vector2<f32>>,
-    visualization  : RefCell<Option<Visualization>>,
+    logger        : Logger,
+    display_object: display::object::Instance,
+    size          : Cell<Vector2<f32>>,
+    visualization : RefCell<Option<Visualization>>,
+    data          : RefCell<Option<Data>>,
 }
 
 impl ContainerData {
     /// Set whether the visualisation should be visible or not.
     pub fn set_visibility(&self, is_visible:bool) {
         if let Some(vis) = self.visualization.borrow().as_ref() {
-            // FIXME remove the `set_visibility` call when the display_object calls are fixed.
-            vis.set_visibility(is_visible);
             if is_visible {
                 vis.display_object().set_parent(&self.display_object);
+                if let Some(callback) = vis.on_show.as_ref() {
+                    callback()
+                }
             } else {
                 vis.display_object().unset_parent();
+                if let Some(callback) = vis.on_hide.as_ref() {
+                    callback()
+                }
             }
         }
     }
@@ -180,26 +235,35 @@ impl ContainerData {
 
     /// Update the data in the inner visualisation.
     pub fn set_data(&self, data:Data) {
-        self.visualization.borrow().for_each_ref(|vis| vis.set_data(data));
+        self.data.set(data.clone_ref());
+        if let Some(vis) = self.visualization.borrow().as_ref() {
+            // TODO add indicator that data does not match
+            vis.set_data(data).unwrap();
+        }
     }
 
     /// Update the content properties with the values from the `ContainerData`.
     ///
     /// Needs to called when a visualisation has been set.
-    fn update_visualisation_properties(&self) {
-        let size     = self.size.get();
-        let position = self.display_object.position();
-        self.visualization.borrow().for_each_ref(|vis| {
-            vis.content.set_size(size);
-            vis.content.set_position(position);
-        });
+    fn init_visualisation_properties(&self) {
+        let size       = self.size.get();
+        let position   = self.node.position();
+
+        if let Some(vis) = self.visualization.borrow().as_ref() {
+            vis.set_size(size);
+            vis.display_object().set_position(position);
+        };
+        self.set_visibility(true);
+        if let Some(data) = self.data.clone().into_inner(){
+            self.set_data(data);
+        }
     }
 
     /// Set the visualization shown in this container..
     pub fn set_visualisation(&self, visualization:Visualization) {
-        self.display_object.add_child(&visualization);
+        visualization.display_object().set_parent(&self);
         self.visualization.replace(Some(visualization));
-        self.update_visualisation_properties();
+        self.init_visualisation_properties();
     }
 }
 
@@ -207,13 +271,14 @@ impl ContainerData {
 impl Container {
     /// Constructor.
     pub fn new() -> Self {
-        let logger         = Logger::new("visualization_container");
+        let logger         = Logger::new("visualization");
         let visualization  = default();
         let size           = Cell::new(Vector2::new(100.0, 100.0));
         let display_object = display::object::Instance::new(&logger);
+        let data           = default();
 
-        let data = ContainerData {logger,visualization,size,display_object};
-        let data = Rc::new(data);
+        let data     = ContainerData {logger,visualization,data,size,display_object};
+        let data     = Rc::new(data);
 
         let frp = default();
 
@@ -279,35 +344,4 @@ impl display::Object for Container {
     fn display_object(&self) -> &display::object::Instance {
         &self.data.display_object
     }
-}
-
-/// Dummy content for testing.
-// FIXME[mm] remove this when actual content is available.
-pub(crate) fn default_content() -> DomSymbol {
-    let div = web::create_div();
-    div.set_style_or_panic("width","100px");
-    div.set_style_or_panic("height","100px");
-
-    let content = web::create_element("div");
-    content.set_inner_html(
-        r#"<svg>
-  <circle style="fill: #69b3a2" stroke="black" cx=50 cy=50 r=20></circle>
-</svg>
-"#);
-    content.set_attribute("width","100%").unwrap();
-    content.set_attribute("height","100%").unwrap();
-
-    div.append_child(&content).unwrap();
-
-    let r          = 102_u8;
-    let g          = 153_u8;
-    let b          = 194_u8;
-    let color      = iformat!("rgb({r},{g},{b})");
-    div.set_style_or_panic("background-color",color);
-
-    let symbol = DomSymbol::new(&div);
-    symbol.dom().set_attribute("id","vis").unwrap();
-    symbol.dom().style().set_property("overflow","hidden").unwrap();
-    symbol
-
 }

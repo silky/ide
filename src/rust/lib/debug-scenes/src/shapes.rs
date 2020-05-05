@@ -12,6 +12,10 @@ use ensogl::display::object::ObjectOps;
 use ensogl::system::web;
 use graph_editor::GraphEditor;
 use wasm_bindgen::prelude::*;
+use graph_editor::component::visualization::Data;
+use graph_editor::component::visualization::sample::*;
+use graph_editor::component::visualization::Visualization;
+use ensogl::display::Scene;
 
 
 #[wasm_bindgen]

@@ -41,7 +41,7 @@ use crate::component::cursor::Cursor;
 use crate::component::node::Node;
 use crate::component::node::WeakNode;
 use crate::component::visualization::Visualization;
-use crate::component::visualization;
+use crate::component::visualization::sample::*;
 
 use enso_frp as frp;
 use enso_frp::Position;
@@ -205,20 +205,25 @@ ensogl::def_command_api! { Commands
     toggle_visualization_visibility,
     /// Set the data for the selected nodes. // TODO only has dummy functionality at the moment.
     debug_set_data_for_selected_node,
+    /// Cycle the visualization for the selected nodes. TODO only has dummy functionality at the moment.
+    cycle_visualisation_for_selected_node,
 }
 
 
 impl Commands {
     pub fn new(network:&frp::Network) -> Self {
         frp::extend! { network
-            def add_node_at_cursor               = source();
-            def remove_selected_nodes            = source();
-            def remove_all_nodes                 = source();
-            def toggle_visualization_visibility  = source();
-            def debug_set_data_for_selected_node = source();
+            def add_node_at_cursor                    = source();
+            def remove_selected_nodes                 = source();
+            def remove_all_nodes                      = source();
+            def toggle_visualization_visibility       = source();
+            def debug_set_data_for_selected_node      = source();
+            def cycle_visualisation_for_selected_node = source();
+
         }
         Self {add_node_at_cursor,remove_selected_nodes,remove_all_nodes,
-              toggle_visualization_visibility,debug_set_data_for_selected_node}
+              toggle_visualization_visibility,debug_set_data_for_selected_node,
+              cycle_visualisation_for_selected_node}
     }
 }
 
@@ -247,6 +252,9 @@ pub struct FrpInputs {
     /// TODO[mm] there is no actual data present at the moment in the system. This needs to be
     /// revisited once there is.
     pub set_visualization_data   : frp::Source<Node>,
+    /// Switch to another valid visualization.
+    pub cycle_visualization      : frp::Source<Node>,
+    pub set_visualization        : frp::Source<(Node,Option<Visualization>)>,
 }
 
 impl FrpInputs {
@@ -262,10 +270,12 @@ impl FrpInputs {
             def set_expression_span_tree = source();
             def set_pattern_span_tree    = source();
             def set_visualization_data   = source();
+            def cycle_visualization      = source();
+            def set_visualization        = source();
         }
         Self {commands,register_node,add_node_at,select_node,translate_selected_nodes,
             add_connection,remove_connection,set_expression_span_tree,set_pattern_span_tree,
-            set_visualization_data}
+            set_visualization_data,cycle_visualization,set_visualization}
     }
 
     fn register_node<T: AsRef<Node>>(&self, arg: T) {
@@ -297,6 +307,9 @@ impl FrpInputs {
     }
     pub fn debug_set_data_for_selected_node(&self) {
         self.debug_set_data_for_selected_node.emit(());
+    }
+    pub fn cycle_visualisation_for_selected_node(&self) {
+        self.cycle_visualisation_for_selected_node.emit(());
     }
 }
 
@@ -419,7 +432,8 @@ impl application::shortcut::DefaultShortcutProvider for GraphEditor {
         Self::self_shortcut(&[Key::Character("n".into())]  , "add_node_at_cursor")
       , Self::self_shortcut(&[Key::Backspace]              , "remove_selected_nodes")
       , Self::self_shortcut(&[Key::Character(" ".into())]  , "toggle_visualization_visibility")
-      , Self::self_shortcut(&[Key::Character("d".into())]  , "debug_set_data_for_selected_node")
+      , Self::self_shortcut(&[Key::Character("d".into())]  , "set_data_for_selected_node")
+      , Self::self_shortcut(&[Key::Character("f".into())]  , "cycle_visualisation_for_selected_node")
         ]
     }
 }
@@ -515,7 +529,7 @@ impl application::View for GraphEditor {
             });
         }));
 
-        def _new_node = inputs.register_node.map(f!((network,nodes,scene,touch,display_object)(node) {
+        def _new_node = inputs.register_node.map(f!((network,nodes,touch,display_object)(node) {
             let weak_node = node.downgrade();
             frp::new_bridge_network! { [network,node.view.events.network]
                 def _node_on_down_tagged = node.view.events.mouse_down.map(f_!((touch) {
@@ -525,14 +539,22 @@ impl application::View for GraphEditor {
 
             display_object.add_child(node);
 
-            let dummy_content = visualization::default_content();
-            let dom_layer    = scene.dom.layers.front.clone_ref();
-            dom_layer.manage(&dummy_content);
-
-            let vis:Visualization = dummy_content.into();
+            let chart = WebglBubbleChart::new();
+            let vis = Visualization::new(Rc::new(chart));
             node.events.set_visualization.emit(Some(vis));
             nodes.set.insert(node.clone_ref());
 
+        }));
+
+         // === Vis Cycling ===
+         def _cycle_vis= inputs.cycle_visualisation_for_selected_node.map(f!((inputs,nodes)(_) {
+            nodes.selected.for_each(|node| inputs.cycle_visualization.emit(node));
+        }));
+
+
+        // === Vis Set ===
+        def _update_vis_data = inputs.set_visualization.map(f!(()((node,vis)) {
+            node.visualization.frp.set_visualization.emit(vis)
         }));
 
 
