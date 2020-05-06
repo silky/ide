@@ -16,6 +16,7 @@ use graph_editor::component::visualization;
 use serde_json::json;
 use graph_editor::component::visualization::sample::*;
 use graph_editor::component::visualization::Visualization;
+use graph_editor::component::visualization::js::*;
 use ensogl::display::Scene;
 
 
