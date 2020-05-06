@@ -14,8 +14,9 @@ span-tree    = { version = "0.1.0"   , path = "../../ide/span-tree" }
 wasm-bindgen = { version = "=0.2.58" , features = ["nightly"]       }
 js-sys       = { version = "0.3.30"                                 }
 
-nalgebra     = { version = "0.19.0"                              }
-serde_json   = { version = "1.0"                                 }
+nalgebra     = { version = "0.19.0"                                 }
+serde_json   = { version = "1.0"                                    }
+serde        = { version = "1.0"    , features = ["derive"]         }
 
 [dependencies.web-sys]
 version = "0.3.4"
