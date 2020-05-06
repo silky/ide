@@ -5,14 +5,15 @@
 //! be of poor quality. Expect drastic changes.
 
 use ensogl::prelude::*;
+use wasm_bindgen::prelude::*;
 
 use ensogl::application::Application;
 use ensogl::display::navigation::navigator::Navigator;
 use ensogl::display::object::ObjectOps;
 use ensogl::system::web;
 use graph_editor::GraphEditor;
-use wasm_bindgen::prelude::*;
-use graph_editor::component::visualization::Data;
+use graph_editor::component::visualization;
+use serde_json::json;
 use graph_editor::component::visualization::sample::*;
 use graph_editor::component::visualization::Visualization;
 use ensogl::display::Scene;
