@@ -40,8 +40,10 @@ use ensogl::traits::*;
 use crate::component::cursor::Cursor;
 use crate::component::node::Node;
 use crate::component::node::WeakNode;
+use crate::component::visualization;
 use crate::component::visualization::Visualization;
 use crate::component::visualization::sample::*;
+use crate::component::visualization::js::make_sample_js_bubble_chart;
 
 use enso_frp as frp;
 use enso_frp::Position;
@@ -52,7 +54,7 @@ use ensogl::display::world::*;
 use ensogl::display;
 use ensogl::system::web::StyleSetter;
 use ensogl::system::web;
-use serde_json::json;
+
 
 #[derive(Clone,CloneRef,Debug,Default)]
 pub struct NodeSet {
@@ -203,7 +205,7 @@ ensogl::def_command_api! { Commands
     remove_all_nodes,
     /// Toggle the visibility of the selected visualisations
     toggle_visualization_visibility,
-    /// Set the data for the selected nodes. // TODO only has dummy functionality at the moment.
+    /// Set the data for the selected nodes. TODO only has dummy functionality at the moment.
     debug_set_data_for_selected_node,
     /// Cycle the visualization for the selected nodes. TODO only has dummy functionality at the moment.
     cycle_visualisation_for_selected_node,
@@ -432,7 +434,7 @@ impl application::shortcut::DefaultShortcutProvider for GraphEditor {
         Self::self_shortcut(&[Key::Character("n".into())]  , "add_node_at_cursor")
       , Self::self_shortcut(&[Key::Backspace]              , "remove_selected_nodes")
       , Self::self_shortcut(&[Key::Character(" ".into())]  , "toggle_visualization_visibility")
-      , Self::self_shortcut(&[Key::Character("d".into())]  , "set_data_for_selected_node")
+      , Self::self_shortcut(&[Key::Character("d".into())]  , "debug_set_data_for_selected_node")
       , Self::self_shortcut(&[Key::Character("f".into())]  , "cycle_visualisation_for_selected_node")
         ]
     }
@@ -554,21 +556,49 @@ impl application::View for GraphEditor {
 
         // === Vis Set ===
         def _update_vis_data = inputs.set_visualization.map(f!(()((node,vis)) {
-            node.visualization.frp.set_visualization.emit(vis)
+            node.visualization_container.frp.set_visualization.emit(vis)
         }));
 
 
         // === Vis Update Data ===
         // TODO remove this once real data is available.
-        let dummy_counter = Rc::new(Cell::new(1.0_f32));
-        def _update_vis_data = inputs.debug_set_data_for_selected_node.map(f!((nodes)(_) {
-            let dc = dummy_counter.get();
-            dummy_counter.set(dc + 0.1);
-            let content = Rc::new(json!(format!("{}", 20.0 + 10.0 * dummy_counter.get().sin())));
-            let dummy_data = Some(visualization::Data::JSON { content });
-            nodes.selected.for_each(move |node| node.visualization_container.frp.set_data.emit(&dummy_data));
-        }));
+         let dummy_counter = Rc::new(Cell::new(1.0_f32));
+         let dummy_switch  = Rc::new(Cell::new(false));
+          def _set_dumy_data = inputs.debug_set_data_for_selected_node.map(f!((nodes)(_) {
+                nodes.selected.for_each(|node| {
+                    let dc = dummy_counter.get();
+                    dummy_counter.set(dc + 0.1);
+                    // let dummy_data = Some(visualization::Data::JSON { content });
+                    let delta1 = dummy_counter.get().sin() * 10.0;
+                    let delta2 =  dummy_counter.get().cos() * 10.0;
+                    let data = vec![
+                        Vector3::new(25.0,75.0,25.0 + delta1),
+                        Vector3::new(25.0,25.0, 25.0 + delta2),
+                        Vector3::new(75.0 - 12.5,75.0 + delta1,12.5),
+                        Vector3::new(75.0 + 12.5,75.0 + delta2,12.5),
+                        Vector3::new(75.0 - 12.5 + delta1,25.0 + delta2,12.5),
+                        Vector3::new(75.0 + 12.5 + delta2,25.0 + delta1,12.5),
+                    ];
+                    let data : Rc<Vec<Vector3<f32>>> = Rc::new(data);
+                    let content = Rc::new(serde_json::to_value(data).unwrap());
+                    let data = visualization::Data::JSON{ content };
+                    node.visualization_container.frp.set_data.emit(Some(data));
+                    })
+            }));
 
+             def _set_dumy_data = inputs.cycle_visualization.map(f!((scene)(node) {
+                let dc = dummy_switch.get();
+                dummy_switch.set(!dc);
+                let vis = if dc {
+                    Visualization::new(Rc::new(WebglBubbleChart::new()))
+                } else {
+                    let chart = make_sample_js_bubble_chart();
+                    let dom_layer = scene.dom.layers.front.clone_ref();
+                    chart.set_dom_layer(&dom_layer);
+                    Visualization::new(Rc::new(chart))
+                };
+                node.visualization_container.frp.set_visualization.emit(Some(vis));
+            }));
 
         // === Toggle Visualization Visibility ===
         def _toggle_selected = inputs.toggle_visualization_visibility.map(f!((nodes)(_) {

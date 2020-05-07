@@ -12,12 +12,6 @@ use ensogl::display::navigation::navigator::Navigator;
 use ensogl::display::object::ObjectOps;
 use ensogl::system::web;
 use graph_editor::GraphEditor;
-use graph_editor::component::visualization;
-use serde_json::json;
-use graph_editor::component::visualization::sample::*;
-use graph_editor::component::visualization::Visualization;
-use graph_editor::component::visualization::js::*;
-use ensogl::display::Scene;
 
 
 #[wasm_bindgen]

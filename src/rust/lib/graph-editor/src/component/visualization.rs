@@ -43,7 +43,7 @@ type DataType = any::TypeId;
 
 /// Wrapper for data that can be consumed by a visualisation.
 /// TODO[mm] consider static versus dynamic typing for visualizations and data!
-#[derive(Clone,CloneRefDebug)]
+#[derive(Clone,CloneRef,Debug)]
 #[allow(missing_docs)]
 pub enum Data {
     JSON   { content : Rc<serde_json::Value> },
@@ -323,7 +323,7 @@ impl ContainerData {
     /// Needs to called when a visualisation has been set.
     fn init_visualisation_properties(&self) {
         let size       = self.size.get();
-        let position   = self.node.position();
+        let position   = self.display_object.position();
 
         if let Some(vis) = self.visualization.borrow().as_ref() {
             vis.set_size(size);
@@ -337,7 +337,7 @@ impl ContainerData {
 
     /// Set the visualization shown in this container..
     pub fn set_visualisation(&self, visualization:Visualization) {
-        visualization.display_object().set_parent(&self);
+        visualization.display_object().set_parent(&self.display_object);
         self.visualization.replace(Some(visualization));
         self.init_visualisation_properties();
     }
@@ -379,7 +379,7 @@ impl Container {
 
             def _f_hide = frp.set_visualization.map(f!((container_data)(visualisation) {
                 if let Some(visualisation) = visualisation.as_ref() {
-                    container_data.set_visualisation(visualisation.clone_ref());
+                    container_data.set_visualisation(visualisation.clone());
                 }
             }));
 
