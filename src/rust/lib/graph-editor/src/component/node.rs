@@ -229,7 +229,7 @@ impl Node {
 
     fn init(self) -> Self {
         // TODO implement dynamic layouting.
-        self.data.visualization_container.set_position(Vector3::new(-50.0,-100.0,0.0));
+        self.data.visualization_container.set_position(Vector3::new(-50.0,-150.0,0.0));
         self.add_child(&self.data.visualization_container);
 
         let network = &self.data.events.network;
