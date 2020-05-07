@@ -42,8 +42,8 @@ use crate::component::node::Node;
 use crate::component::node::WeakNode;
 use crate::component::visualization;
 use crate::component::visualization::Visualization;
-use crate::component::visualization::renderer::sample::*;
-use crate::component::visualization::js::make_sample_js_bubble_chart;
+use crate::component::visualization::renderer::sample::native::*;
+use crate::component::visualization::sample::js::sample_js_bubble_chart;
 
 use enso_frp as frp;
 use enso_frp::Position;
@@ -592,7 +592,7 @@ impl application::View for GraphEditor {
                 let vis = if dc {
                     Visualization::new(Rc::new(WebglBubbleChart::new()))
                 } else {
-                    let chart = make_sample_js_bubble_chart();
+                    let chart     = sample_js_bubble_chart();
                     let dom_layer = scene.dom.layers.front.clone_ref();
                     chart.set_dom_layer(&dom_layer);
                     Visualization::new(Rc::new(chart))
