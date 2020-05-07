@@ -208,7 +208,7 @@ ensogl::def_command_api! { Commands
     /// Set the data for the selected nodes. TODO only has dummy functionality at the moment.
     debug_set_data_for_selected_node,
     /// Cycle the visualization for the selected nodes. TODO only has dummy functionality at the moment.
-    cycle_visualisation_for_selected_node,
+    debug_cycle_visualisation_for_selected_node,
 }
 
 
@@ -220,12 +220,12 @@ impl Commands {
             def remove_all_nodes                      = source();
             def toggle_visualization_visibility       = source();
             def debug_set_data_for_selected_node      = source();
-            def cycle_visualisation_for_selected_node = source();
+            def debug_cycle_visualisation_for_selected_node = source();
 
         }
         Self {add_node_at_cursor,remove_selected_nodes,remove_all_nodes,
               toggle_visualization_visibility,debug_set_data_for_selected_node,
-              cycle_visualisation_for_selected_node}
+              debug_cycle_visualisation_for_selected_node}
     }
 }
 
@@ -310,8 +310,8 @@ impl FrpInputs {
     pub fn debug_set_data_for_selected_node(&self) {
         self.debug_set_data_for_selected_node.emit(());
     }
-    pub fn cycle_visualisation_for_selected_node(&self) {
-        self.cycle_visualisation_for_selected_node.emit(());
+    pub fn debug_cycle_visualisation_for_selected_node(&self) {
+        self.debug_cycle_visualisation_for_selected_node.emit(());
     }
 }
 
@@ -435,7 +435,7 @@ impl application::shortcut::DefaultShortcutProvider for GraphEditor {
       , Self::self_shortcut(&[Key::Backspace]              , "remove_selected_nodes")
       , Self::self_shortcut(&[Key::Character(" ".into())]  , "toggle_visualization_visibility")
       , Self::self_shortcut(&[Key::Character("d".into())]  , "debug_set_data_for_selected_node")
-      , Self::self_shortcut(&[Key::Character("f".into())]  , "cycle_visualisation_for_selected_node")
+      , Self::self_shortcut(&[Key::Character("f".into())]  , "debug_cycle_visualisation_for_selected_node")
         ]
     }
 }
@@ -549,7 +549,7 @@ impl application::View for GraphEditor {
         }));
 
          // === Vis Cycling ===
-         def _cycle_vis= inputs.cycle_visualisation_for_selected_node.map(f!((inputs,nodes)(_) {
+         def _cycle_vis= inputs.debug_cycle_visualisation_for_selected_node.map(f!((inputs,nodes)(_) {
             nodes.selected.for_each(|node| inputs.cycle_visualization.emit(node));
         }));
 
@@ -568,7 +568,6 @@ impl application::View for GraphEditor {
                 nodes.selected.for_each(|node| {
                     let dc = dummy_counter.get();
                     dummy_counter.set(dc + 0.1);
-                    // let dummy_data = Some(visualization::Data::JSON { content });
                     let delta1 = dummy_counter.get().sin() * 10.0;
                     let delta2 =  dummy_counter.get().cos() * 10.0;
                     let data = vec![
