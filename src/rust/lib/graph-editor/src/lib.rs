@@ -42,7 +42,7 @@ use crate::component::node::Node;
 use crate::component::node::WeakNode;
 use crate::component::visualization;
 use crate::component::visualization::Visualization;
-use crate::component::visualization::sample::*;
+use crate::component::visualization::renderer::sample::*;
 use crate::component::visualization::js::make_sample_js_bubble_chart;
 
 use enso_frp as frp;
