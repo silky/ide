@@ -40,10 +40,11 @@ use ensogl::traits::*;
 use crate::component::cursor::Cursor;
 use crate::component::node::Node;
 use crate::component::node::WeakNode;
-use crate::component::visualization;
 use crate::component::visualization::Visualization;
+use crate::component::visualization::data::SampleDataGenerator3D;
 use crate::component::visualization::renderer::sample::native::*;
 use crate::component::visualization::sample::js::sample_js_bubble_chart;
+use crate::component::visualization;
 
 use enso_frp as frp;
 use enso_frp::Position;
@@ -562,42 +563,30 @@ impl application::View for GraphEditor {
 
         // === Vis Update Data ===
         // TODO remove this once real data is available.
-         let dummy_counter = Rc::new(Cell::new(1.0_f32));
-         let dummy_switch  = Rc::new(Cell::new(false));
-          def _set_dumy_data = inputs.debug_set_data_for_selected_node.map(f!((nodes)(_) {
-                nodes.selected.for_each(|node| {
-                    let dc = dummy_counter.get();
-                    dummy_counter.set(dc + 0.1);
-                    let delta1 = dummy_counter.get().sin() * 10.0;
-                    let delta2 =  dummy_counter.get().cos() * 10.0;
-                    let data = vec![
-                        Vector3::new(25.0,75.0,25.0 + delta1),
-                        Vector3::new(25.0,25.0, 25.0 + delta2),
-                        Vector3::new(75.0 - 12.5,75.0 + delta1,12.5),
-                        Vector3::new(75.0 + 12.5,75.0 + delta2,12.5),
-                        Vector3::new(75.0 - 12.5 + delta1,25.0 + delta2,12.5),
-                        Vector3::new(75.0 + 12.5 + delta2,25.0 + delta1,12.5),
-                    ];
-                    let data : Rc<Vec<Vector3<f32>>> = Rc::new(data);
-                    let content = Rc::new(serde_json::to_value(data).unwrap());
-                    let data = visualization::Data::JSON{ content };
+        let dummy_switch  = Rc::new(Cell::new(false));
+        let sample_data_generator = SampleDataGenerator3D::default();
+        def _set_dumy_data = inputs.debug_set_data_for_selected_node.map(f!((nodes)(_) {
+            nodes.selected.for_each(|node| {
+                let data : Rc<Vec<Vector3<f32>>> = Rc::new(sample_data_generator.generate_data());
+                let content = Rc::new(serde_json::to_value(data).unwrap());
+                let data = visualization::Data::JSON{ content };
                     node.visualization_container.frp.set_data.emit(Some(data));
-                    })
-            }));
+                })
+        }));
 
-             def _set_dumy_data = inputs.cycle_visualization.map(f!((scene)(node) {
-                let dc = dummy_switch.get();
-                dummy_switch.set(!dc);
-                let vis = if dc {
-                    Visualization::new(Rc::new(WebglBubbleChart::new()))
-                } else {
-                    let chart     = sample_js_bubble_chart();
-                    let dom_layer = scene.dom.layers.front.clone_ref();
-                    chart.set_dom_layer(&dom_layer);
-                    Visualization::new(Rc::new(chart))
-                };
-                node.visualization_container.frp.set_visualization.emit(Some(vis));
-            }));
+         def _set_dumy_data = inputs.cycle_visualization.map(f!((scene)(node) {
+            let dc = dummy_switch.get();
+            dummy_switch.set(!dc);
+            let vis = if dc {
+                Visualization::new(Rc::new(WebglBubbleChart::new()))
+            } else {
+                let chart     = sample_js_bubble_chart();
+                let dom_layer = scene.dom.layers.front.clone_ref();
+                chart.set_dom_layer(&dom_layer);
+                Visualization::new(Rc::new(chart))
+            };
+            node.visualization_container.frp.set_visualization.emit(Some(vis));
+        }));
 
         // === Toggle Visualization Visibility ===
         def _toggle_selected = inputs.toggle_visualization_visibility.map(f!((nodes)(_) {
