@@ -87,16 +87,15 @@ impl SampleDataGenerator3D {
         let current_value = self.counter.get();
         self.counter.set(current_value + 0.1);
 
-        let delta1 = current_value.sin() * 10.0;
-        let delta2 = current_value.cos() * 10.0;
+        let delta1 = current_value.sin() * 1.0;
+        let delta2 = current_value.cos() * 1.0;
 
        vec![
-            Vector3::new(25.0,75.0,25.0 + delta1),
-            Vector3::new(25.0,25.0, 25.0 + delta2),
-            Vector3::new(75.0 - 12.5,75.0 + delta1,5.0),
-            Vector3::new(75.0 + 12.5,75.0 + delta2,15.0),
-            Vector3::new(75.0 - 12.5 + delta1,25.0 + delta2,5.0),
-            Vector3::new(75.0 + 12.5 + delta2,25.0 + delta1,15.0),
+            Vector3::new(0.0 ,0.0, 5.0 + delta1),
+            Vector3::new(25.0,25.0,10.0 + delta2),
+            Vector3::new(50.0,50.0,15.0),
+            Vector3::new(75.0,75.0,15.0 + delta1),
+            Vector3::new(100.0 ,100.0,20.0 + delta2),
         ]
     }
 }

@@ -140,8 +140,8 @@ impl component::ShapeViewDefinition for BubbleView {
     fn new(shape:&Self::Shape, _scene:&Scene, shape_registry:&ShapeRegistry) -> Self {
         shape.sprite.size().set(Vector2::new(100.0,100.0));
         let shape_system = shape_registry.shape_system(PhantomData::<shape::Shape>);
-        shape_system.shape_system.set_alignment(alignment::HorizontalAlignment::Left,
-                                                alignment::VerticalAlignment::Bottom);
+        shape_system.shape_system.set_alignment(alignment::HorizontalAlignment::Center,
+                                                alignment::VerticalAlignment::Center);
         Self {}
     }
 }
@@ -180,11 +180,14 @@ impl DataRenderer for WebglBubbleChart {
         views.resize_with(data_inner.len(),|| component::ShapeView::new(&self.logger));
 
         views.iter().zip(data_inner.iter()).for_each(|(view,item)| {
+
+            println!("DATA: {}", item);
             view.display_object.set_parent(&self.display_object);
+            view.display_object.set_position(Vector3::new(item.x, item.y, 0.0));
             if let Some(t) = view.data.borrow().as_ref() {
+                println!("INSTANCE_ID: {}", t.shape.sprite.instance_id);
                 t.shape.sprite.size().set(self.size.get());
                 t.shape.radius.set(item.z);
-                t.shape.position.set(Vector2::new(item.x,item.y));
             };
         });
         Ok(())
