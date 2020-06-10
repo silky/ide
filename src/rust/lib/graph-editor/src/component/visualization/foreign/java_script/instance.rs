@@ -93,18 +93,43 @@ type PreprocessorCallbackCell = Rc<RefCell<Option<Box<dyn PreprocessorCallback>>
 #[derive(Clone,CloneRef,Derivative)]
 #[derivative(Debug)]
 #[allow(missing_docs)]
+pub struct InstanceModelData {
+    pub root_node                : DomSymbol,
+    pub logger                   : Logger,
+    on_data_received             : Rc<Option<js_sys::Function>>,
+    set_size                     : Rc<Option<js_sys::Function>>,
+    object                       : Rc<js_sys::Object>,
+    #[derivative(Debug="ignore")]
+    preprocessor_change_callback : PreprocessorCallbackCell,
+}
+
+/// Strongly owned wrapper for the InstanceModel.
+#[derive(Clone,CloneRef,Debug)]
 pub struct InstanceModel {
-    pub root_node                    : DomSymbol,
-    pub logger                       : Logger,
-        on_data_received             : Rc<Option<js_sys::Function>>,
-        set_size                     : Rc<Option<js_sys::Function>>,
-        object                       : Rc<js_sys::Object>,
-        #[derivative(Debug="ignore")]
-        preprocessor_change_callback : PreprocessorCallbackCell,
+    data: Rc<InstanceModelData>
 }
 
 impl InstanceModel {
+    fn downgrade(&self) -> WeakInstanceModel {
+        let data = Rc::downgrade(&self.data);
+        WeakInstanceModel {data}
+    }
+}
 
+/// Weakly owned wrapper for the InstanceModel.
+#[derive(Clone,CloneRef,Debug)]
+pub struct WeakInstanceModel {
+    data: Weak<InstanceModelData>
+}
+
+impl WeakInstanceModel {
+    fn upgrade(&self) -> Option<InstanceModel> {
+        let data = self.data.upgrade()?;
+        Some(InstanceModel{data})
+    }
+}
+
+impl InstanceModelData {
     fn create_root() -> result::Result<DomSymbol, Error> {
         let div       = web::create_div();
         let root_node = DomSymbol::new(&div);
@@ -161,7 +186,7 @@ impl InstanceModel {
         let logger           = Logger::new("Instance");
         let object           = Rc::new(object);
 
-        Ok(InstanceModel{object,on_data_received,set_size,root_node,logger,
+        Ok(InstanceModelData{object,on_data_received,set_size,root_node,logger,
             preprocessor_change_callback
         })
     }
@@ -230,21 +255,31 @@ impl Instance {
     pub fn new(class:&JsValue, scene:&Scene) -> result::Result<Instance, Error>  {
         let network = default();
         let frp     = visualization::instance::Frp::new(&network);
-        let model   = InstanceModel::from_class(class)?;
-        model.set_dom_layer(&scene.dom.layers.main);
+        let data   = InstanceModelData::from_class(class)?;
+        data.set_dom_layer(&scene.dom.layers.main);
+        let data = Rc::new(data);
+        let model = InstanceModel{data};
 
         Ok(Instance{model,frp,network}.init_frp().inti_preprocessor_callback())
     }
 
     fn init_frp(self) -> Self {
-        let network = &self.network;
-        let model   = self.model.clone_ref();
-        let frp     = self.frp.clone_ref();
+        /// FIXME if we don't give ownership to the FRP, no one owns the visualisation and
+        /// everything is dropped.
+        let network     = &self.network;
+        let weak_model  = self.model.downgrade();
+        let frp         = self.frp.clone_ref();
         frp::extend! { network
-            eval frp.set_size  ((size) model.set_size(*size));
-            eval frp.send_data ([frp](data) {
-                if let Err(e) = model.receive_data(data) {
-                    frp.data_receive_error.emit(Some(e));
+            eval frp.set_size  ([weak_model](size) {
+                if let Some(model) = weak_model.upgrade() {
+                    model.data.set_size(*size)
+                }
+            });
+            eval frp.send_data ([frp,weak_model](data) {
+                if let Some(model) = weak_model.upgrade() {
+                    if let Err(e) = model.data.receive_data(data) {
+                        frp.data_receive_error.emit(Some(e));
+                    }
                 }
              });
         }
@@ -252,13 +287,12 @@ impl Instance {
     }
 
     fn inti_preprocessor_callback(self) -> Self {
-        // FIXME This leaks memory. Is there a way to get a weak reference to the frp node here?
         let on_change  = self.frp.on_change.clone_ref();
         let callback = move |s:String| {
             on_change.emit_event(&s.into());
         };
         let callback = Box::new(callback);
-        self.model.preprocessor_change_callback.borrow_mut().replace(callback);
+        self.model.data.preprocessor_change_callback.borrow_mut().replace(callback);
         self
     }
 
@@ -272,7 +306,7 @@ impl From<Instance> for visualization::Instance {
 
 impl display::Object for Instance {
     fn display_object(&self) -> &display::object::Instance {
-        &self.model.root_node.display_object()
+        &self.model.data.root_node.display_object()
     }
 }
 
